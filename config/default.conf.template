@@ -1,0 +1,147 @@
+# http headers for protection
+add_header X-Content-Type-Options nosniff;
+add_header Referrer-Policy strict-origin-when-cross-origin;
+
+# Compress before sending
+gzip on;
+gzip_min_length 10240;
+gzip_comp_level 2;
+gzip_vary on;
+gzip_types
+    # text/html is always compressed by HttpGzipModule
+    text/css
+    text/javascript
+    text/xml
+    text/plain
+    text/x-component
+    application/javascript
+    application/x-javascript
+    application/json
+    application/xml
+    application/rss+xml
+    application/atom+xml
+    font/truetype
+    font/opentype
+    application/vnd.ms-fontobject
+    image/svg+xml;
+
+# Disable logging of successful requests
+access_log off;
+
+# allow the server to close connection on non responding client, this will free up memory
+reset_timedout_connection on;
+
+# request timed out -- default 60
+client_body_timeout 10;
+
+# if client stop responding, free up memory -- default 60
+send_timeout 10;
+
+# ----------------------------------------------------------------------------------------------------------------#
+  
+# Redirect from http to https
+server {
+  listen ${PROXY__PORT_80} default_server;
+  server_name _;
+  return 301 https://$host$request_uri;
+}
+
+# Redirect from wwww
+server {
+  listen ${PROXY__PORT_443};
+  server_name www.${SITE__DOMAIN};
+  return 301 https://${SITE__DOMAIN}$request_uri;
+}
+
+# Handling non-existent domains
+server {
+  server_name "";
+  # Turn on protocol HTTPS 
+  listen ${PROXY__PORT_443} ssl http2 default_server;
+  ssl_certificate ${WORKDIR_BASE}/${PROXY__SSL_CERT_SITE};
+  ssl_certificate_key ${WORKDIR_BASE}/${PROXY__SSL_KEY_SITE};
+  return 404;
+}
+
+# Admin
+server {
+  server_name ${ADMIN__DOMAIN};
+
+  # Redirect requests with a slash (/) to a URL without a slash
+  rewrite ^/(.*)/$ /$1 permanent;
+
+  # Turn on protocol HTTPS 
+  listen ${PROXY__PORT_443} ssl http2;
+  ssl_certificate ${WORKDIR_BASE}/${PROXY__SSL_CERT_ADMIN};
+  ssl_certificate_key ${WORKDIR_BASE}/${PROXY__SSL_KEY_ADMIN};
+
+  # Max size data
+  client_max_body_size ${PROXY__CLIENT_MAX_BODY_SIZE_ADMIN};
+
+  # files - images
+  location ~^/images {
+    root ${WORKDIR_BASE}/${FILES__STORAGE_PERMANENT};
+  }
+
+  # files - favicon
+  location ~^/favicon.ico {
+    root ${WORKDIR_BASE}/${FILES__STORAGE_PERMANENT}/images/app/${ADMIN__NAME};
+  }
+
+  # direct requests to server API
+  location ~^/api {
+    proxy_pass http://${API__SERVICE}:${API__PORT};
+    proxy_set_header Host            $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+  }
+
+  # proxy
+  location / {
+    # WebSokets for live reload for development
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "Upgrade";
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    
+    # Redirect all browser requests to an external address Docker
+    # To be able to display the site on the domain
+    proxy_pass http://${ADMIN__SERVICE}:${ADMIN__PORT};
+    proxy_set_header Host            $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+  }
+}
+
+# Site
+server {
+  server_name ${SITE__DOMAIN};
+  
+  # Redirect requests with a slash (/) to a URL without a slash
+  rewrite ^/(.*)/$ /$1 permanent;
+
+  # Turn on protocol HTTPS 
+  listen ${PROXY__PORT_443} ssl http2;
+
+  # ssl on;
+  ssl_certificate ${WORKDIR_BASE}/${PROXY__SSL_CERT_SITE};
+  ssl_certificate_key ${WORKDIR_BASE}/${PROXY__SSL_KEY_SITE};
+
+  # Max size data
+  client_max_body_size ${PROXY__CLIENT_MAX_BODY_SIZE_SITE};
+
+  # files - images
+  location ~^/images {
+    root ${WORKDIR_BASE}/${FILES__STORAGE_PERMANENT};
+  }
+
+  # files - favicon
+  location ~^/favicon.ico {
+    root ${WORKDIR_BASE}/${FILES__STORAGE_PERMANENT}/images/app/${SITE__NAME};
+  }
+
+  # proxy
+  location / {
+    proxy_pass http://${SITE__SERVICE}:${SITE__PORT};
+    proxy_set_header Host            $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+  }
+}
